@@ -1,0 +1,24 @@
+when symbols hit while parsing put tags instead of them
+
+read input file char by char with fgetc for getting control over space chars
+    -> if c isspace
+        -> if 'word' has something
+            -> wrap 'word' and do the thing, reset word_idx
+            -> put the 'word' and c in output
+        -> else
+            -> put c in 'word' until size limit hits
+                ->if limit hits
+                    -> wrap 'word' and do the thing, reset word_idx
+                    -> put c in new 'word'
+
+is_void idea put as is
+
+add is_open for tracking open/close state
+
+add is_inline & is_line for distinction tracking
+
+config design " #::<h1>::</h1>::line_status::f "
+
+a stack for backtracking tags connecting the original entry
+
+use stack differently for line/inline tags
