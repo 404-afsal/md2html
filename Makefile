@@ -1,10 +1,10 @@
 # 1. Variables
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99 -g
-TARGET = m
+TARGET = md2html
 
 # 2. List all your .c files here (Separated by spaces)
-SRCS = main.c parser.c hashmap.c
+SRCS = main.c parser.c ds_handle.c
 
 # 3. Automatically generate .o (object) file names from the .c files
 OBJS = $(SRCS:.c=.o)

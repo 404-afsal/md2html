@@ -2,14 +2,15 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "hashmap.h"
+#include "ds_handle.h"
 #include "parser.h"
 
 mapEntry *table[MAX_BUCKETS];
-Stack stack;
+TagStack stack;
 
 void parse_md(FILE *inptr, FILE *outptr)
 {
@@ -22,73 +23,132 @@ void parse_md(FILE *inptr, FILE *outptr)
         return;
     }
 
-    char line_buf[MAX_LINE_LEN];
-    char word[MAX_WORD_LEN];
-    mapEntry *t;
+    char line_buff[MAX_LINE_LEN];
 
-    stackinit();
-
-    while (fgets(line_buf, sizeof(line_buf), inptr) != NULL)
+    while (fgets(line_buff, sizeof(line_buff), inptr) != NULL)
     {
-        char *ptr = line_buf;
-        int bytes_read = 0;
-        int word_count = 0;
+        char *ptr = line_buff;
 
-        while (sscanf(ptr, "%49s%n", word, &bytes_read) == 1)
+        char *event_ptr;
+        Tickets ts;
+        tickets_init(&ts);
+
+        int table_idx = 0;
+        while (table_idx < MAX_BUCKETS) // Is the current idx exist
         {
-            if (word_count > 0)
+            if (table[table_idx])
             {
-                fprintf(outptr, " "); // Print a separator space ONLY if it's not the first word
-            }
-            if (stack.top == -1)
-            {
-                t = search_key(table, word);
-
-                if (t == NULL)
+                mapEntry *curr_entry = table[table_idx];
+                while (curr_entry != NULL) // Is the current entry in the current idx exist
                 {
-                    fprintf(outptr, "%s", word);
-                    word_count++;
+                    // Find all the keys in the input line
+                    char *key = table[table_idx]->symbol;
+                    while ((event_ptr = strstr(ptr, key)) != NULL)
+                    {
+                        if (ts.size >= ts.cap)
+                        {
+                            tickets_resize(&ts);
+                        }
+                        ts.tickets[ts.size].entry = table[table_idx];
+                        ts.tickets[ts.size].line_ptr = event_ptr;
+                        ts.size++;
+
+                        ptr = event_ptr + strlen(key);
+                    }
+                    curr_entry = curr_entry->next;
+                }
+            }
+
+            table_idx++;
+        }
+
+        // Shift the multi-symbol ticket array into a singular ordered timeline
+        qsort(ts.tickets, ts.size, sizeof(EventTicket), compare_tickets);
+
+        char *current = line_buff;
+        if (*current == '\n' || *current == '\0')
+        {
+            fprintf(outptr, "\n");
+            continue;
+        }
+
+        stackinit(&stack, ts.size);
+
+        int t_idx = 0;
+        while (t_idx < ts.size)
+        {
+            int text_len = ts.tickets[t_idx].line_ptr - current;
+            fprintf(outptr, "%.*s", text_len, current);
+            current = ts.tickets[t_idx].line_ptr;
+
+            // Print the appropriate tag/tags
+            if (stack.top != -1)
+            {
+                if (peek(&stack, ts.tickets[t_idx].entry))
+                {
+                    stack.frame[stack.top].tag_state = STATE_CLOSED;
                 }
                 else
                 {
-                    stack.stack_frame[++(stack.top)].entry = t;
-                    if (stack.stack_frame[stack.top].entry->line_status == LINE)
-                    {
-                        fprintf(outptr, "%s", t->tag[0]);
-                        word_count++;
-                        stack.stack_frame[stack.top].tag_state = STATE_OPENED;
-                    }
+                    // Push
+                    push(&stack, ts.tickets[t_idx].entry);
                 }
             }
             else
             {
+                // Push
+                push(&stack, ts.tickets[t_idx].entry);
+            }
 
-                if (stack.stack_frame[stack.top].entry->line_status == LINE)
+            if (stack.frame[stack.top].tag_state == STATE_CLOSED)
+            {
+                fprintf(outptr, "%s", stack.frame[stack.top].entry->tag[1]);
+                current += strlen(stack.frame[stack.top].entry->symbol);
+
+                pop(&stack);
+            }
+            else
+            {
+                fprintf(outptr, "%s", stack.frame[stack.top].entry->tag[0]);
+                if (stack.frame[stack.top].entry->is_void == VOID)
                 {
-                    if (stack.stack_frame[stack.top].tag_state == STATE_OPENED)
-                    {
-                        fprintf(outptr, "%s", word);
-                        word_count++;
-                        stack.stack_frame[stack.top].tag_state = STATE_CLOSED;
-                    }
+                    current += strlen(stack.frame[stack.top].entry->symbol);
+                    pop(&stack);
+                }
+                else
+                {
+                    stack.frame[stack.top].tag_state = STATE_CLOSED;
+                    current += strlen(stack.frame[stack.top].entry->symbol);
                 }
             }
-            ptr += bytes_read;
+            t_idx++;
         }
+        if (stack.top != -1)
+        {
+            char *next_nl = strchr(current, '\n');
+            int len = next_nl - current;
+            if (len)
+            {
+                fprintf(outptr, "%.*s%s", len, current, stack.frame[stack.top].entry->tag[1]);
+            }
+            else
+            {
+                fprintf(outptr, "%s%s", current, stack.frame[stack.top].entry->tag[1]);
+            }
+            current += len;
+
+            pop(&stack);
+        }
+        if (*current)
+        {
+            fprintf(outptr, "%s", current);
+        }
+        // Free stack & tickets
+        free_stack(&stack);
+        free_tickets(&ts);
     }
 
-    t = NULL;
     free_map(table);
-}
-
-void stackinit()
-{
-    stack.top = -1;
-    for (int i = 0; i < MAX_S_FRAMES; i++)
-    {
-        stack.stack_frame[i].entry = NULL;
-        stack.stack_frame[i].tag_state = STATE_UNKNOWN;
-    }
 }
 
 int get_tags(const char *config_name)
@@ -101,121 +161,49 @@ int get_tags(const char *config_name)
 
     char buffer[BUF_SIZE];
 
-    // state tracking {0 = not exist, 1 = in the middle of processing, 2 = finished processsing}
-    int key_status = 0;
-    int val1_status = 0;
-    int val2_status = 0;
-    bool is_void_status = false;
-    bool is_line_status = false;
-
     while (fgets(buffer, sizeof(buffer), file) != NULL)
     {
         buffer[strcspn(buffer, "\n")] = '\0'; // remove '\n' from the buffer
-
-        key_status = 0;
-        val1_status = 0;
-        val2_status = 0;
-        is_void_status = 0;
-
-        char prev = ':';
         char *ptr = buffer;
+        int bytes_read;
 
-        char key[MAX_STR_LEN];
-        int keyidx = 0;
-        char val[2][MAX_STR_LEN];
-        int val1_idx = 0;
-        int val2_idx = 0;
-        Is_Void is_void = NON_VOID; // default
-        LineStatus line = LINE;
+        char key[MAX_KEY_LEN];
+        char val[2][MAX_VAL_LEN];
+        Is_Void is_void;
+        char is_void_str[32];
+        LineStatus line;
+        char line_str[32];
 
-        while (*ptr != '\0')
+        sscanf(ptr, "%[^:]::%n", is_void_str, &bytes_read);
+        ptr += bytes_read;
+        if (strcmp(is_void_str, "VOID") == 0)
         {
-            if (*ptr != ':')
-            {
-                if (prev == ':')
-                {
-                    if (key_status < 2)
-                    {
-                        key_status++;
-                    }
-                    if (key_status == 2)
-                    {
-                        if (*ptr == 't')
-                        {
-                            is_void_status = true;
-                        }
-                        else
-                        {
-                            is_void_status = false;
-                        }
-                    }
-                    if (key_status == 2 && val1_status)
-                    {
-                        val1_status++;
-                    }
-                    if (is_void_status)
-                    {
-                        if (val1_status == 2)
-                        {
-                            val2_status++;
-                        }
-                        if (val2_status == 2)
-                        {
-                            is_line_status = true;
-                        }
-                    }
-                }
-
-                if (key_status == 1)
-                {
-                    key[keyidx++] = *ptr;
-                    key[keyidx] = '\0';
-                }
-
-                if (is_void_status)
-                {
-                    if (*ptr == 't')
-                    {
-                        is_void = 1;
-                    }
-                    else
-                    {
-                        is_void = 0;
-                    }
-                }
-
-                if (val1_status == 1)
-                {
-                    val[0][val1_idx++] = *ptr;
-                    val[0][val1_idx] = '\0';
-                }
-
-                if (val1_status == 1)
-                {
-                    val[1][val2_idx++] = *ptr;
-                    val[1][val2_idx] = '\0';
-                }
-
-                if (is_line_status)
-                {
-                    line = *ptr;
-                }
-                else
-                {
-                    line = 0; // default
-                }
-            }
-
-            prev = *ptr;
-            ptr++;
+            is_void = VOID;
+        }
+        else
+        {
+            is_void = NON_VOID; // default
         }
 
-        if (is_void)
+        if (is_void == VOID)
         {
-            val[1][val2_idx] = '\0';
+            sscanf(ptr, "%[^:]::%[^:]::%s", key, val[0], line_str);
+        }
+        else
+        {
+            sscanf(ptr, "%[^:]::%[^:]::%[^:]::%s", key, val[0], val[1], line_str);
         }
 
-        if (key_status == 2 && val1_status == 2)
+        if (strcmp(line_str, "INLINE") == 0)
+        {
+            line = INLINE;
+        }
+        else
+        {
+            line = LINE; // default
+        }
+
+        if (strlen(key) > 0 && strlen(val[0]) > 0)
         {
             config_put(key, val, is_void, line);
         }
@@ -225,7 +213,7 @@ int get_tags(const char *config_name)
     return 0;
 }
 
-void config_put(char *key, char val[][MAX_STR_LEN], Is_Void is_void, LineStatus line_status)
+void config_put(char *key, char val[][MAX_VAL_LEN], Is_Void is_void, LineStatus line_status)
 {
     int idx = hash_map(key);
 

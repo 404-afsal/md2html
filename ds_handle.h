@@ -1,5 +1,5 @@
-#ifndef HASHMAP_H
-#define HASHMAP_H
+#ifndef DS_HANDLE_H
+#define DS_HANDLE_H
 
 #include <stdbool.h>
 
@@ -17,6 +17,7 @@ typedef enum
     VOID,
     NON_VOID
 } Is_Void;
+
 typedef struct mapEntry
 {
     // key:value; symbol:tag[]
@@ -43,12 +44,37 @@ typedef struct
 
 typedef struct
 {
-    StackFrame stack_frame[MAX_S_FRAMES];
+    StackFrame *frame;
     int top;
-} Stack;
+    int size;
+} TagStack;
+
+typedef struct
+{
+    char *line_ptr;
+    mapEntry *entry;
+} EventTicket;
+
+typedef struct
+{
+    EventTicket *tickets;
+    int size;
+    int cap;
+} Tickets;
 
 int hash_map(char *key);
 mapEntry *search_key(mapEntry **table, char *key);
 void free_map(mapEntry **table);
+
+void stackinit(TagStack *stack, int size);
+void push(TagStack *stack, mapEntry *entry);
+bool peek(const TagStack *stack, mapEntry *entry);
+void pop(TagStack *stack);
+void free_stack(TagStack *stack);
+
+void tickets_init(Tickets *t);
+void tickets_resize(Tickets *t);
+int compare_tickets(const void *a, const void *b);
+void free_tickets(Tickets *t);
 
 #endif

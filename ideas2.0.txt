@@ -1,0 +1,64 @@
+================================================================================
+MDR2HTML PARSER ENGINE ARCHITECTURE BLUEPRINT
+================================================================================
+
+--------------------------------------------------------------------------------
+STAGE 1: DYNAMIC CONFIGURATION INTAKE (get_tags)
+--------------------------------------------------------------------------------
+Format Layout: [Type]::[Symbol]::[OpenTag]::[CloseTag]::[VoidState]
+Pattern Logic: Sscanf with bounded non-delimiter scans.
+Matching Flag: "%[^:]::%[^:]::%[^:]::%[^:]::%s"
+
+--------------------------------------------------------------------------------
+STAGE 2: TOKEN TIMELINE PIPELINE (parse_md)
+--------------------------------------------------------------------------------
+
+1. TRACKING TICKET ARCHITECTURE
+   Define an independent struct array to capture individual string events.
+   
+   Properties per Event Ticket:
+   - Memory Address Pointer (char* ptr) -> Location returned by strstr()
+   - Configuration Map Link (mapEntry* entry) -> Access to associated tags
+
+2. COLLECTION & FLATTENING (The Haystack Scan)
+   - For each line buffer read:
+     - Iteratively loop through the Hash Map configuration keys.
+     - Call strstr(line_buffer, current_map_key) to find matching addresses.
+     - Append every unique discovery as an isolated Ticket instance into 
+       a flat tracking array.
+
+3. CHRONOLOGICAL MATRIX SORTING
+   - Shift multi-symbol arrays into a singular ordered timeline.
+   - Run a standard sorting algorithm directly on the Ticket elements.
+   - Evaluation Criteria: Lower memory addresses signify an earlier physical 
+     position in the string array stream.
+   - Formula: if (ticket[i].ptr > ticket[i+1].ptr) -> Swap positions.
+
+4. STREAM RECONSTRUCTION & TRANSFORMATION
+   - Initialize a baseline look-ahead tracker: char *current_pos = line_buf;
+   - Sequential Loop through the Sorted Ticket Timeline:
+     
+     A. Calculate String Gap Distance:
+        text_length = current_ticket.ptr - current_pos
+        
+     B. Direct Stream Output (Bounded Precision):
+        Output exactly 'text_length' characters starting from 'current_pos'
+        Formula: printf("%.*s", text_length, current_pos);
+        
+     C. Structural State Tag Injection:
+        Evaluate current_ticket.entry->line_status
+        - If INLINE: Interrogate Stack. Switch open/close state tags.
+        - If LINE: Set evaluation gate flag (bool close_line_tag = true).
+        
+     D. Shift Tracking Pointer:
+        Advance head index past the matched symbol length boundary.
+        Formula: current_pos = current_ticket.ptr + strlen(symbol);
+
+--------------------------------------------------------------------------------
+STAGE 3: BOUNDARY EDGE CASES (PHASE 2 DEPLOYMENT)
+--------------------------------------------------------------------------------
+- Symmetric Tokens (Inline): Stateful execution toggled exclusively inside 
+  the Transformation iteration loop.
+- Asymmetric Tokens (Line Blocks): Structural gate flag evaluation deferred 
+  until the loop encounters the terminal string boundaries ('\n' or '\0').
+================================================================================
